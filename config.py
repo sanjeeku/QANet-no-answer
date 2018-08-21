@@ -12,9 +12,9 @@ from main import train, test, demo
 flags = tf.flags
 
 home = os.getcwd()
-train_file = os.path.join(home, "datasets", "squad", "train-v1.1.json")
-dev_file = os.path.join(home, "datasets", "squad", "dev-v1.1.json")
-test_file = os.path.join(home, "datasets", "squad", "dev-v1.1.json")
+train_file = os.path.join(home, "datasets", "squad", "train-v2.0.json")
+dev_file = os.path.join(home, "datasets", "squad", "dev-v2.0.json")
+test_file = os.path.join(home, "datasets", "squad", "dev-v2.0.json")
 glove_word_file = os.path.join(home, "datasets", "glove", "glove.840B.300d.txt")
 
 train_dir = "train"
@@ -126,7 +126,7 @@ def main(_):
     elif config.mode == "prepro":
         prepro(config)
     elif config.mode == "debug":
-        config.num_steps = 2
+        config.num_steps = 1
         config.val_num_batches = 1
         config.checkpoint = 1
         config.period = 1

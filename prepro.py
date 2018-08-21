@@ -63,25 +63,39 @@ def process_file(filename, data_type, word_counter, char_counter):
                             char_counter[char] += 1
                     y1s, y2s = [], []
                     answer_texts = []
-                    for answer in qa["answers"]:
-                        answer_text = answer["text"]
-                        answer_start = answer['answer_start']
-                        answer_end = answer_start + len(answer_text)
-                        answer_texts.append(answer_text)
-                        answer_span = []
-                        for idx, span in enumerate(spans):
-                            if not (answer_end <= span[0] or answer_start >= span[1]):
-                                answer_span.append(idx)
-                        y1, y2 = answer_span[0], answer_span[-1]
-                        y1s.append(y1)
-                        y2s.append(y2)
+
+                    # no answer in squad 2.0
+                    no_answer = False
+                    answers = qa["answers"]
+                    if len(answers) > 0:
+                        for answer in qa["answers"]:
+                            answer_text = answer["text"]
+                            answer_start = answer['answer_start']
+                            answer_end = answer_start + len(answer_text)
+                            answer_texts.append(answer_text)
+                            answer_span = []
+                            for idx, span in enumerate(spans):
+                                if not (answer_end <= span[0] or answer_start >= span[1]):
+                                    answer_span.append(idx)
+                            y1, y2 = answer_span[0], answer_span[-1]
+                    else:
+                        y1, y2 = -1, -1
+                        no_answer = True
+
+                    y1s.append(y1)
+                    y2s.append(y2)
+
                     example = {"context_tokens": context_tokens, "context_chars": context_chars, "ques_tokens": ques_tokens,
-                               "ques_chars": ques_chars, "y1s": y1s, "y2s": y2s, "id": total}
+                            "ques_chars": ques_chars, "y1s": y1s, "y2s": y2s, "id": total, "no_answer": no_answer}
                     examples.append(example)
                     eval_examples[str(total)] = {
-                        "context": context, "spans": spans, "answers": answer_texts, "uuid": qa["id"]}
+                            "context": context, "spans": spans, "answers": answer_texts, "uuid": qa["id"], "no_answer": no_answer}
         random.shuffle(examples)
         print("{} questions in total".format(len(examples)))
+        for e in examples:
+            if e['no_answer']:
+                print("[INFO] NO ANSWER", len(e.keys()))
+                break
     return examples, eval_examples
 
 
@@ -243,8 +257,9 @@ def build_features(config, examples, data_type, out_file, word2idx_dict, char2id
                     break
                 ques_char_idxs[i, j] = _get_char(char)
 
-        start, end = example["y1s"][-1], example["y2s"][-1]
-        y1[start], y2[end] = 1.0, 1.0
+        if not example["no_answer"]:
+            start, end = example["y1s"][-1], example["y2s"][-1]
+            y1[start], y2[end] = 1.0, 1.0
 
         record = tf.train.Example(features=tf.train.Features(feature={
                                   "context_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_idxs.tostring()])),
@@ -253,7 +268,8 @@ def build_features(config, examples, data_type, out_file, word2idx_dict, char2id
                                   "ques_char_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_char_idxs.tostring()])),
                                   "y1": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y1.tostring()])),
                                   "y2": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y2.tostring()])),
-                                  "id": tf.train.Feature(int64_list=tf.train.Int64List(value=[example["id"]]))
+                                  "id": tf.train.Feature(int64_list=tf.train.Int64List(value=[example["id"]])),
+                                  "no_answer": tf.train.Feature(int64_list=tf.train.Int64List(value=[example["no_answer"]]))
                                   }))
         writer.write(record.SerializeToString())
     print("Built {} / {} instances of features in total".format(total, total_))

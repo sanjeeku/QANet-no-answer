@@ -1,5 +1,5 @@
 import tensorflow as tf
-from layers import initializer, regularizer, residual_block, highway, conv, mask_logits, trilinear, total_params, optimized_trilinear_for_attention
+from layers import initializer, regularizer, residual_block, highway, conv, mask_logits, trilinear, total_params, optimized_trilinear_for_attention, _linear
 
 class Model(object):
     def __init__(self, config, batch, word_mat=None, char_mat=None, trainable=True, opt=True, demo = False, graph = None):
@@ -10,6 +10,10 @@ class Model(object):
 
             self.global_step = tf.get_variable('global_step', shape=[], dtype=tf.int32,
                                                initializer=tf.constant_initializer(0), trainable=False)
+            self.MAX_PL = tf.constant(400, shape=[], dtype=tf.int32)
+            self.weights1 = tf.get_variable("na_linear_kernel1", [400, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+            self.weights2 = tf.get_variable("na_linear_kernel2", [400, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+
             self.dropout = tf.placeholder_with_default(0.0, (), name="dropout")
             if self.demo:
                 self.c = tf.placeholder(tf.int32, [None, config.test_para_limit],"context")
@@ -19,7 +23,7 @@ class Model(object):
                 self.y1 = tf.placeholder(tf.int32, [None, config.test_para_limit],"answer_index1")
                 self.y2 = tf.placeholder(tf.int32, [None, config.test_para_limit],"answer_index2")
             else:
-                self.c, self.q, self.ch, self.qh, self.y1, self.y2, self.qa_id = batch.get_next()
+                self.c, self.q, self.ch, self.qh, self.y1, self.y2, self.qa_id, self.no_answer = batch.get_next()
 
             # self.word_unk = tf.get_variable("word_unk", shape = [config.glove_dim], initializer=initializer())
             self.word_mat = tf.get_variable("word_mat", initializer=tf.constant(
@@ -74,20 +78,26 @@ class Model(object):
                 self.char_mat, self.ch), [N * PL, CL, dc])
             qh_emb = tf.reshape(tf.nn.embedding_lookup(
                 self.char_mat, self.qh), [N * QL, CL, dc])
+
+            # shape = (?, 16, 64)
             ch_emb = tf.nn.dropout(ch_emb, 1.0 - 0.5 * self.dropout)
             qh_emb = tf.nn.dropout(qh_emb, 1.0 - 0.5 * self.dropout)
 
-			# Bidaf style conv-highway encoder
+            # Bidaf style conv-highway encoder
+            # d(hidden_size) = 96
             ch_emb = conv(ch_emb, d,
                 bias = True, activation = tf.nn.relu, kernel_size = 5, name = "char_conv", reuse = None)
             qh_emb = conv(qh_emb, d,
                 bias = True, activation = tf.nn.relu, kernel_size = 5, name = "char_conv", reuse = True)
+            # shape = (?, 12, 96)
 
             ch_emb = tf.reduce_max(ch_emb, axis = 1)
             qh_emb = tf.reduce_max(qh_emb, axis = 1)
+            # shape = (?, 96)
 
             ch_emb = tf.reshape(ch_emb, [N, PL, ch_emb.shape[-1]])
             qh_emb = tf.reshape(qh_emb, [N, QL, ch_emb.shape[-1]])
+            # shape = (32, ?, 96)
 
             c_emb = tf.nn.dropout(tf.nn.embedding_lookup(self.word_mat, self.c), 1.0 - self.dropout)
             q_emb = tf.nn.dropout(tf.nn.embedding_lookup(self.word_mat, self.q), 1.0 - self.dropout)
@@ -131,7 +141,7 @@ class Model(object):
             mask_q = tf.expand_dims(self.q_mask, 1)
             S_ = tf.nn.softmax(mask_logits(S, mask = mask_q))
             mask_c = tf.expand_dims(self.c_mask, 2)
-            S_T = tf.transpose(tf.nn.softmax(mask_logits(S, mask = mask_c), dim = 1),(0,2,1))
+            S_T = tf.transpose(tf.nn.softmax(mask_logits(S, mask = mask_c), axis=1), (0, 2, 1))
             self.c2q = tf.matmul(S_, q)
             self.q2c = tf.matmul(tf.matmul(S_, S_T), c)
             attention_outputs = [c, self.c2q, c * self.c2q, c * self.q2c]
@@ -158,22 +168,65 @@ class Model(object):
                     )
 
         with tf.variable_scope("Output_Layer"):
-            start_logits = tf.squeeze(conv(tf.concat([self.enc[1], self.enc[2]],axis = -1),1, bias = False, name = "start_pointer"),-1)
-            end_logits = tf.squeeze(conv(tf.concat([self.enc[1], self.enc[3]],axis = -1),1, bias = False, name = "end_pointer"), -1)
+            # self.enc[1] = (32, ?, 96)
+            conv1 = conv(tf.concat([self.enc[1], self.enc[2]], axis=-1), 1, bias=False, name="start_pointer")
+            # tf.shape(conv1) = (32, ?, 1)
+            start_logits = tf.squeeze(conv1, -1)
+            # tf.shape(start_logits) = (32, ?)
+            conv2 = conv(tf.concat([self.enc[1], self.enc[3]], axis=-1), 1, bias=False, name="end_pointer")
+            end_logits = tf.squeeze(conv2, -1)
+
+            # mask ??
             self.logits = [mask_logits(start_logits, mask = self.c_mask),
                            mask_logits(end_logits, mask = self.c_mask)]
 
             logits1, logits2 = [l for l in self.logits]
 
+            # shape = (32, ?) -> cause the context length is variable
+            # matmul([32, ?, 1] x [32, 1, ?])
             outer = tf.matmul(tf.expand_dims(tf.nn.softmax(logits1), axis=2),
                               tf.expand_dims(tf.nn.softmax(logits2), axis=1))
+            # outer = (32, ?, ?)
             outer = tf.matrix_band_part(outer, 0, config.ans_limit)
-            self.yp1 = tf.argmax(tf.reduce_max(outer, axis=2), axis=1)
-            self.yp2 = tf.argmax(tf.reduce_max(outer, axis=1), axis=1)
-            losses = tf.nn.softmax_cross_entropy_with_logits(
-                logits=logits1, labels=self.y1)
-            losses2 = tf.nn.softmax_cross_entropy_with_logits(
-                logits=logits2, labels=self.y2)
+
+            reduced1 = tf.reduce_max(outer, axis=2)
+            reduced2 = tf.reduce_max(outer, axis=1)
+            # tf.shape(reduced) = (32, ?)
+
+            # ###############################################
+            paddings = [[0, 0], [0, self.MAX_PL - tf.shape(reduced1)[0]]]
+
+            reduced1 = tf.pad(reduced1, paddings, "CONSTANT")
+            reduced2 = tf.pad(reduced2, paddings, "CONSTANT")
+
+            reduced1 = tf.slice(reduced1, [0, 0], [N, self.MAX_PL])
+            reduced2 = tf.slice(reduced2, [0, 0], [N, self.MAX_PL])
+            # tf.shape(reduced) = (32, ?)
+
+            # no answer flag: (no_answer, answer_exist)
+            # TODO add additinal layer
+            # TODO dimenstion between reduced and weight
+            na_flag1 = tf.cast(tf.argmax(tf.matmul(reduced1, self.weights1), axis=1), tf.float32)
+            na_flag2 = tf.cast(tf.argmax(tf.matmul(reduced2, self.weights2), axis=1), tf.float32)
+            # Tensor("Output_Layer/ArgMax:0", shape=(32, ?), dtype=int64)
+
+            self.yp1 = tf.argmax(reduced1, axis=1)
+            self.yp2 = tf.argmax(reduced2, axis=1)
+
+            print(tf.reduce_sum(reduced1, axis=1))
+            print(tf.multiply(na_flag1, tf.reduce_sum(reduced1, axis=1)))
+            print(tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits1, labels=self.y1))
+
+            # no_answer
+            losses = tf.where(self.no_answer > 0,
+                    tf.multiply(na_flag1, tf.reduce_sum(reduced1, axis=1)),
+                    tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits1, labels=self.y1))
+
+            losses2 = tf.where(self.no_answer > 0,
+                    tf.multiply(na_flag2, tf.reduce_sum(reduced2, axis=1)),
+                    tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits2, labels=self.y2))
+
+            #################################################
             self.loss = tf.reduce_mean(losses + losses2)
 
         if config.l2_norm is not None:

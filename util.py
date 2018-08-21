@@ -22,7 +22,8 @@ def get_record_parser(config, is_test=False):
                                                "ques_char_idxs": tf.FixedLenFeature([], tf.string),
                                                "y1": tf.FixedLenFeature([], tf.string),
                                                "y2": tf.FixedLenFeature([], tf.string),
-                                               "id": tf.FixedLenFeature([], tf.int64)
+                                               "id": tf.FixedLenFeature([], tf.int64),
+                                               "no_answer": tf.FixedLenFeature([], tf.int64)
                                            })
         context_idxs = tf.reshape(tf.decode_raw(
             features["context_idxs"], tf.int32), [para_limit])
@@ -37,7 +38,8 @@ def get_record_parser(config, is_test=False):
         y2 = tf.reshape(tf.decode_raw(
             features["y2"], tf.float32), [para_limit])
         qa_id = features["id"]
-        return context_idxs, ques_idxs, context_char_idxs, ques_char_idxs, y1, y2, qa_id
+        no_answer = features["no_answer"]
+        return context_idxs, ques_idxs, context_char_idxs, ques_char_idxs, y1, y2, qa_id, no_answer
     return parse
 
 
@@ -78,10 +80,15 @@ def convert_tokens(eval_file, qa_id, pp1, pp2):
         context = eval_file[str(qid)]["context"]
         spans = eval_file[str(qid)]["spans"]
         uuid = eval_file[str(qid)]["uuid"]
-        start_idx = spans[p1][0]
-        end_idx = spans[p2][1]
-        answer_dict[str(qid)] = context[start_idx: end_idx]
-        remapped_dict[uuid] = context[start_idx: end_idx]
+        if len(eval_file[str(qid)]["answers"]) == 0:
+            # no answer
+            answer_dict[str(qid)] = []
+            remapped_dict[uuid] = []
+        else:
+            start_idx = spans[p1][0]
+            end_idx = spans[p2][1]
+            answer_dict[str(qid)] = context[start_idx: end_idx]
+            remapped_dict[uuid] = context[start_idx: end_idx]
     return answer_dict, remapped_dict
 
 
@@ -91,6 +98,8 @@ def evaluate(eval_file, answer_dict):
         total += 1
         ground_truths = eval_file[key]["answers"]
         prediction = value
+        # print("----------------------------")
+        # print(prediction, ground_truths)
         exact_match += metric_max_over_ground_truths(
             exact_match_score, prediction, ground_truths)
         f1 += metric_max_over_ground_truths(f1_score,
@@ -137,7 +146,14 @@ def exact_match_score(prediction, ground_truth):
 
 def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
     scores_for_ground_truths = []
-    for ground_truth in ground_truths:
-        score = metric_fn(prediction, ground_truth)
-        scores_for_ground_truths.append(score)
-    return max(scores_for_ground_truths)
+    # for no answer in squad 2.0
+    if len(ground_truths) == 0:
+        if len(prediction) == 0:
+            return 1
+        else:
+            return 0
+    else:
+        for ground_truth in ground_truths:
+            score = metric_fn(prediction, ground_truth)
+            scores_for_ground_truths.append(score)
+        return max(scores_for_ground_truths)
