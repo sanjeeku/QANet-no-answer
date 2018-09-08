@@ -82,8 +82,8 @@ def convert_tokens(eval_file, qa_id, pp1, pp2):
         uuid = eval_file[str(qid)]["uuid"]
         if len(eval_file[str(qid)]["answers"]) == 0:
             # no answer
-            answer_dict[str(qid)] = []
-            remapped_dict[uuid] = []
+            answer_dict[str(qid)] = ""
+            remapped_dict[uuid] = ""
         else:
             start_idx = spans[p1][0]
             end_idx = spans[p2][1]

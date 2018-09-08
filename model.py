@@ -11,8 +11,12 @@ class Model(object):
             self.global_step = tf.get_variable('global_step', shape=[], dtype=tf.int32,
                                                initializer=tf.constant_initializer(0), trainable=False)
             self.MAX_PL = tf.constant(400, shape=[], dtype=tf.int32)
-            self.weights1 = tf.get_variable("na_linear_kernel1", [400, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
-            self.weights2 = tf.get_variable("na_linear_kernel2", [400, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+
+            self.weights1 = tf.get_variable("na_linear_kernel1", [400, 128], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+            self.weights2 = tf.get_variable("na_linear_kernel2", [400, 128], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+
+            self.weights11 = tf.get_variable("na_linear_kernel11", [128, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
+            self.weights22 = tf.get_variable("na_linear_kernel22", [128, 2], dtype=tf.float32, initializer=tf.initializers.random_uniform)
 
             self.dropout = tf.placeholder_with_default(0.0, (), name="dropout")
             if self.demo:
@@ -205,9 +209,12 @@ class Model(object):
 
             # no answer flag: (no_answer, answer_exist)
             # TODO add additinal layer
-            # TODO dimenstion between reduced and weight
-            na_flag1 = tf.cast(tf.argmax(tf.matmul(reduced1, self.weights1), axis=1), tf.float32)
-            na_flag2 = tf.cast(tf.argmax(tf.matmul(reduced2, self.weights2), axis=1), tf.float32)
+            # TODO dimension between reduced and weight
+            na_layer1 = tf.matmul(tf.nn.relu(tf.matmul(reduced1, self.weights1)), self.weights11)
+            na_flag1 = tf.cast(tf.argmax(na_layer1, axis=1), tf.float32)
+
+            na_layer2 = tf.matmul(tf.nn.relu(tf.matmul(reduced2, self.weights2)), self.weights22)
+            na_flag2 = tf.cast(tf.argmax(na_layer2, axis=1), tf.float32)
             # Tensor("Output_Layer/ArgMax:0", shape=(32, ?), dtype=int64)
 
             self.yp1 = tf.argmax(reduced1, axis=1)
