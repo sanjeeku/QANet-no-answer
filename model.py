@@ -217,8 +217,9 @@ class Model(object):
             na_flag2 = tf.cast(tf.argmax(na_layer2, axis=1), tf.float32)
             # Tensor("Output_Layer/ArgMax:0", shape=(32, ?), dtype=int64)
 
-            self.yp1 = tf.argmax(reduced1, axis=1)
-            self.yp2 = tf.argmax(reduced2, axis=1)
+            print(tf.shape(reduced1))
+            self.yp1 = tf.where(na_flag1 > 0, tf.argmax(reduced1, axis=1), tf.constant(-1, shape=[N], dtype=tf.int64))
+            self.yp2 = tf.where(na_flag2 > 0, tf.argmax(reduced2, axis=1), tf.constant(-1, shape=[N], dtype=tf.int64))
 
             print(tf.reduce_sum(reduced1, axis=1))
             print(tf.multiply(na_flag1, tf.reduce_sum(reduced1, axis=1)))
