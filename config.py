@@ -20,7 +20,7 @@ test_file = os.path.join(home, "datasets", "squad", "squad_2.0_output_2.json")
 glove_word_file = os.path.join(home, "datasets", "glove", "glove.840B.300d.txt")
 
 train_dir = "train"
-model_name = "bug-fix-1heads"
+model_name = "v1-dist-add-1head"
 dir_name = os.path.join(train_dir, model_name)
 if not os.path.exists(train_dir):
     os.mkdir(train_dir)

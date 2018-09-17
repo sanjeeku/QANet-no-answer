@@ -207,19 +207,21 @@ class Model(object):
             reduced2 = tf.slice(reduced2, [0, 0], [N, self.MAX_PL])
             # tf.shape(reduced) = (32, ?)
 
+            reduced = tf.add(reduced1, reduced2, name="ans-dist-sum")
+
             # no answer flag: (no_answer, answer_exist)
             # TODO add additinal layer
             # TODO dimension between reduced and weight
-            na_layer1 = tf.matmul(tf.nn.relu(tf.matmul(reduced1, self.weights1)), self.weights11)
+            na_layer1 = tf.matmul(tf.nn.relu(tf.matmul(reduced, self.weights1)), self.weights11)
             na_flag1 = tf.cast(tf.argmax(na_layer1, axis=1), tf.float32)
 
-            na_layer2 = tf.matmul(tf.nn.relu(tf.matmul(reduced2, self.weights2)), self.weights22)
-            na_flag2 = tf.cast(tf.argmax(na_layer2, axis=1), tf.float32)
+            # na_layer2 = tf.matmul(tf.nn.relu(tf.matmul(reduced2, self.weights2)), self.weights22)
+            # na_flag2 = tf.cast(tf.argmax(na_layer2, axis=1), tf.float32)
             # Tensor("Output_Layer/ArgMax:0", shape=(32, ?), dtype=int64)
 
-            print(tf.shape(reduced1))
+            print(tf.shape(reduced))
             self.yp1 = tf.where(na_flag1 > 0, tf.argmax(reduced1, axis=1), tf.constant(-1, shape=[N], dtype=tf.int64))
-            self.yp2 = tf.where(na_flag2 > 0, tf.argmax(reduced2, axis=1), tf.constant(-1, shape=[N], dtype=tf.int64))
+            self.yp2 = tf.where(na_flag1 > 0, tf.argmax(reduced2, axis=1), tf.constant(-1, shape=[N], dtype=tf.int64))
 
             print(tf.reduce_sum(reduced1, axis=1))
             print(tf.multiply(na_flag1, tf.reduce_sum(reduced1, axis=1)))
@@ -231,7 +233,7 @@ class Model(object):
                     tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits1, labels=self.y1))
 
             losses2 = tf.where(self.no_answer > 0,
-                    tf.multiply(na_flag2, tf.reduce_sum(reduced2, axis=1)),
+                    tf.multiply(na_flag1, tf.reduce_sum(reduced2, axis=1)),
                     tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits2, labels=self.y2))
 
             #################################################
